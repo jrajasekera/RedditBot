@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <link rel="stylesheet" type="text/css" href="/static/style.css">
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.2.1/jquery.min.js"></script>
+  </head>
+  <body>
+    <h1>RedditBot</h1>
+    <h2>A chatbot trained on Reddit comments threads</h2>
+    <h3>RedditBot may take anywhere from 1-15 minutes to respond</h3>
+    <div>
+      <div id="chatbox">
+        <p class="botText"><span>Hi! I'm RedditBot.</span></p>
+      </div>
+      <div class="lds-facebook"><div></div><div></div><div></div></div>
+      <div id="userInput">
+        <input id="textInput" type="text" name="msg" placeholder="Message">
+        <input id="buttonInput" type="submit" value="Send">
+      </div>
+      <script>
+        // get task status promise
+        var getTaskStatus = function(taskId) {
+          return new Promise(function(resolve, reject) {
+            $.get("/getTaskStatus", { id: taskId }).then(function(status) {
+              resolve(status);
+            })
+          });
+        }
+
+        // get task result promise
+        var getTaskResult = function(taskId) {
+          return new Promise(function(resolve, reject) {
+            $.get("/getTaskResult", { id: taskId }).then(function(result) {
+              resolve(result);
+            })
+          });
+        }
+
+        // cancel task promise
+        var cancelTask = function(taskId) {
+          return new Promise(function(resolve, reject) {
+            $.get("/cancelTask", { id: taskId }).then(function(result) {
+              resolve(result);
+            })
+          });
+        }
+
+        // polling function to check status of task
+        function poll(fn, timeout, interval) {
+            var endTime = Number(new Date()) + (timeout || 2000);
+            interval = interval || 100;
+
+            var checkCondition = function(resolve, reject) {
+                // If the condition is met, we're done!
+                fn().then(function(result) {
+                  if(result == 'True') {
+                      resolve(result);
+                  }
+                  // If the condition isn't met but the timeout hasn't elapsed, go again
+                  else if (Number(new Date()) < endTime) {
+                      setTimeout(checkCondition, interval, resolve, reject);
+                  }
+                  // Didn't match and too much time, reject!
+                  else {
+                      reject(new Error('Error: Timed Out'));
+                  }
+                });
+            };
+            return new Promise(checkCondition);
+        }
+
+        function getBotResponse() {
+          // show loader on page
+          document.getElementsByClassName('lds-facebook')[0].style.display = "inherit";
+
+          // read user input and add message to page
+          var rawText = $("#textInput").val();
+          var userHtml = '<p class="userText"><span>' + rawText + '</span></p>';
+          $("#textInput").val("");
+          $("#chatbox").append(userHtml);
+          document.getElementById('userInput').scrollIntoView({block: 'start', behavior: 'smooth'});
+
+          // get response from server
+          $.get("/getWebUI", { msg: rawText }).then(function(data) {
+            return data;
+          }).then(function (id){
+            // poll for response
+            var timeout = 900000; // 15 minute timeout
+            var interval = 5000; // 5 second update interval
+            return poll(function() {return getTaskStatus(id);}, timeout, interval)
+              .then(function() {
+                // Polling done
+                return id;
+              }).catch(function() {
+                // Polling timed out, handle the error!
+                console.log('Polling timed out.');
+                // cancel the task
+                return cancelTask(id).then(function (result){
+                    console.log('Task Cancelled');
+                    return '';
+                });
+            });
+          }).then(function (id){
+              var failureMsg = "I'm sorry, I'm having trouble processing your message. Please try another message.(15 minute timeout)";
+              if(id.length > 0) {
+                return getTaskResult(id).then(function (result){
+                    if(result.length > 0) {
+                      return result;
+                    } else {
+                      return failureMsg;
+                    }
+                })
+              }
+              return failureMsg;
+          }).then(function(result) {
+            // hide loader on page
+            document.getElementsByClassName('lds-facebook')[0].style.display = "none";
+            // add bot response text to page
+            var botHtml = '<p class="botText"><span>' + result + '</span></p>';
+            $("#chatbox").append(botHtml);
+            document.getElementById('userInput').scrollIntoView({block: 'start', behavior: 'smooth'});
+          }, function(err) {
+            console.log(err);
+          });
+        }
+        $("#textInput").keypress(function(e) {
+            if(e.which == 13) {
+                getBotResponse();
+            }
+        });
+        $("#buttonInput").click(function() {
+          getBotResponse();
+        })
+      </script>
+    </div>
+  </body>
+</html>
